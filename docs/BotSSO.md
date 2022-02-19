@@ -1,10 +1,12 @@
+# Messaging Extension with SSO Authentication Calls Detailed
 
-# Messaging Extension Flow
+This documents the Single Sign On process for a Teams Messaging Extension.
+From the compose box click on the ... and find your Teams app and click on it.
+This will initiate an `Invoke` call to your bot.
 
-1. Post request received in controller
-Request has a Bearer Token in the Header
+Post request received in controller
 
-The token is an OpenID token
+The request has a `Bearer Token` in the header which is an Open ID token:
 ```json
 {
   "alg": "RS256",
@@ -20,10 +22,8 @@ The token is an OpenID token
 }.[Signature]
 ```
 
-- More detail
-Open ID Connect token is validated in the Bot Framework Adapter
-
-https://login.botframework.com/v1/.well-known/openidconfiguration
+The Open ID Connect token is validated in the Bot Framework Adapter.
+Here is the [Open ID Configuration](https://login.botframework.com/v1/.well-known/openidconfiguration)
 ```json
 {
   "issuer": "https://api.botframework.com",
@@ -37,8 +37,10 @@ https://login.botframework.com/v1/.well-known/openidconfiguration
   ]
 }
 ```
+After the token is validated, the corresponding Teams Invoke Activity is executed, 
+ie `composeExtension/query` which calls the `OnTeamsMessagingExtensionQueryAsync` method.
 
-## The turnContext.Activity object contains this data
+The turnContext.Activity object contains this data
 ```json
 {
     "type": "invoke",
@@ -131,39 +133,45 @@ https://login.botframework.com/v1/.well-known/openidconfiguration
 }
 ```
 
-## Now we need to get a token for the user
-
+Now we need to get a token for the user
+action.State will be null, unless the user just went through the sign in process
 ```c#
-var tokenResponse = await GetTokenResponse(turnContext, action.State, cancellationToken); //State = null
+var tokenResponse = await GetTokenResponse(turnContext, action.State, cancellationToken);
 ```
-
 _connectionName = OAuth Connection from Azure Bot
-magicCode = State = null
+magicCode, which is action.State will still be null
 ```c#
 var tokenResponse = await provider.GetUserTokenAsync(turnContext, _connectionName, magicCode, cancellationToken: cancellationToken); 
 ```
 
-An OAuth client is created using the Azure Bot Client ID and Client Secret - refer to bottom
+An OAuth HttpClient is created and and used for all calls to Azure.
+An authToken generated from the Azure Bot Client ID and Client Secret 
+is added to all of the requests.
 
-token = https://api.botframework.com/api/usertoken/GetToken?userId=29%3A17GtpxGgHIa1f4tdko79rRk-_e6NHwlG8RKqI3ow010CQz8ZFhdkhF0SEDc8glS7Qle7QjTlWlGhW6RMykmq8wg&connectionName=GoogleG1&channelId=msteams&code=
-token = null => Generate a sign in Url and return to user
-token = !null => use token for downstream requests
+This will request a token from Bot Framework for the user and for the OAuth provider.
+`https://api.botframework.com/api/usertoken/GetToken?userId=<TeamsUserId>&connectionName=<AzureBot OAuth Connection Name>&channelId=msteams&code=<Code from Teams during Sign In process>`
 
-## sign in url
+Example:
+`https://api.botframework.com/api/usertoken/GetToken?userId=29%3A17GtpxGgHIa1f4tdko79rRk-_e6NHwlG8RKqI3ow010CQz8ZFhdkhF0SEDc8glS7Qle7QjTlWlGhW6RMykmq8wg&connectionName=GoogleG1&channelId=msteams&code=`
+
+- User Token is `null`
+  - If this returns null, then the token has expired and the user will need to sign in. 
+    The next step is to request a sign in Url and send it back to the user to initiate the sign in process.
+
+- User Token is returned
+  - The token can be used for requests to that service
+
+
+### Get the Oauth Sign In Link
 
 ```c#
 var signInLink = await (turnContext.Adapter as IUserTokenProvider).GetOauthSignInLinkAsync(turnContext, _connectionName, cancellationToken);
 ```
---client cred auth token is sent
-https://api.botframework.com/api/botsignin/GetSignInUrl?state=eyJjb25uZWN0aW9uTmFtZSI6Ikdvb2dsZUcxIiwiY29udmVyc2F0aW9uIjp7...
 
-oAuthEndpoint = https://login.microsoftonline.com/botframework.com
-scope = https://api.botframework.com
-
-this state code = this base64Encoded
+This object is serialized and Base64Encoded
 ```json
 {
-  "connectionName": "GoogleG1",
+  "connectionName": "Google",
   "conversation": {
     "activityId": "f:21ea8a22-4a5b-3c22-2155-d09fb53127fd",
     "user": {
@@ -197,7 +205,11 @@ this state code = this base64Encoded
 }
 ```
 
-that retuns = https://token.botframework.com/api/oauth/signin?signin=f7e5543c902f441796859304743c04b3
+- Request
+  - A request is sent to this endpoint and the state is serialized Base64Encoded object above.
+  - https://api.botframework.com/api/botsignin/GetSignInUrl?state=eyJjb25uZWN0aW9uTmFtZSI6Ikdvb2dsZUcxIiwiY29udmVyc2F0aW9uIjp7...
+- Response
+  - https://token.botframework.com/api/oauth/signin?signin=f7e5543c902f441796859304743c04b3
 
 this is the link the user clicks on to do the auth
 
