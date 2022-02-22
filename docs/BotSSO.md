@@ -4,7 +4,7 @@ This documents the Single Sign On process for a Teams Messaging Extension.
 From the compose box click on the ... and find your Teams app and click on it.
 This will initiate an `Invoke` call to your bot.
 
-Post request received in controller
+### Post request received in controller
 
 The request has a `Bearer Token` in the header which is an Open ID token:
 ```json
@@ -22,7 +22,7 @@ The request has a `Bearer Token` in the header which is an Open ID token:
 }.[Signature]
 ```
 
-The Open ID Connect token is validated in the Bot Framework Adapter.
+###  The Open ID Connect token is validated in the Bot Framework Adapter.
 Here is the [Open ID Configuration](https://login.botframework.com/v1/.well-known/openidconfiguration)
 ```json
 {
@@ -133,22 +133,25 @@ The turnContext.Activity object contains this data
 }
 ```
 
-Now we need to get a token for the user
-action.State will be null, unless the user just went through the sign in process
+### Get User Token
+`action.State` will be null, unless the user just went through the sign in process.
 ```c#
 var tokenResponse = await GetTokenResponse(turnContext, action.State, cancellationToken);
 ```
-_connectionName = OAuth Connection from Azure Bot
-magicCode, which is action.State will still be null
+
 ```c#
+// _connectionName = OAuth Connection Name from Azure Bot resource
+// magicCode, which is action.State will still be null (unless the user went through the sign in process).
 var tokenResponse = await provider.GetUserTokenAsync(turnContext, _connectionName, magicCode, cancellationToken: cancellationToken); 
 ```
 
-An OAuth HttpClient is created and and used for all calls to Azure.
+### OAuth HttpClient
+An OAuth HttpClient is created and used for all calls to Azure.
 An authToken generated from the Azure Bot Client ID and Client Secret 
 is added to all of the requests.
 
 This will request a token from Bot Framework for the user and for the OAuth provider.
+`code` is the action.State or the magicCode received during the sign in process, otherwise it will be null.
 `https://api.botframework.com/api/usertoken/GetToken?userId=<TeamsUserId>&connectionName=<AzureBot OAuth Connection Name>&channelId=msteams&code=<Code from Teams during Sign In process>`
 
 Example:
@@ -168,16 +171,17 @@ Example:
 var signInLink = await (turnContext.Adapter as IUserTokenProvider).GetOauthSignInLinkAsync(turnContext, _connectionName, cancellationToken);
 ```
 
-This object is serialized and Base64Encoded
+This object is serialized and Base64Encoded:
+`state=eyJjb25uZWN0aW9uTmFtZSI6Ikdvb2dsZUcxIiwiY29udmVyc2F0aW9uIjp7...`
 ```json
 {
-  "connectionName": "Google",
+  "connectionName": "Google", // OAuth Connection Name
   "conversation": {
     "activityId": "f:21ea8a22-4a5b-3c22-2155-d09fb53127fd",
     "user": {
-      "id": "29:17GtpxGgHIa1f4tdko79rRk-_e6NHwlG8RKqI3ow010CQz8ZFhdkhF0SEDc8glS7Qle7QjTlWlGhW6RMykmq8wg",
+      "id": "29:17GtpxGgHIa1f4tdko79rRk-_e6NHwlG8RKqI3ow010CQz8ZFhdkhF0SEDc8glS7Qle7QjTlWlGhW6RMykmq8wg", // User's Teams
       "name": "Brennen Cage",
-      "aadObjectId": "8324bcf9-6ce3-32zj-a146-b69e11ccbc45",
+      "aadObjectId": "8324bcf9-6ce3-32zj-a146-b69e11ccbc45", // User AAD ObjectId
       "role": null
     },
     "bot": {
@@ -201,61 +205,84 @@ This object is serialized and Base64Encoded
   },
   "relatesTo": null,
   "botUrl": null,
-  "msAppId": "ee70da8a-1222-4916-bf83-e7ad34327b25"
+  "msAppId": "ee70da8a-1222-4916-bf83-e7ad34327b25" // Azure Bot AAD ID
 }
 ```
-
+### Get Sign In Url
 - Request
   - A request is sent to this endpoint and the state is serialized Base64Encoded object above.
   - https://api.botframework.com/api/botsignin/GetSignInUrl?state=eyJjb25uZWN0aW9uTmFtZSI6Ikdvb2dsZUcxIiwiY29udmVyc2F0aW9uIjp7...
 - Response
   - https://token.botframework.com/api/oauth/signin?signin=f7e5543c902f441796859304743c04b3
 
-this is the link the user clicks on to do the auth
+The SignIn Url needs to be returned to the user for them to click on and initiate the Sign In process.
+```c#
+return new MessagingExtensionResponse
+{
+    ComposeExtension = new MessagingExtensionResult
+    {
+        Type = "auth",
+        SuggestedActions = new MessagingExtensionSuggestedAction
+        {
+            Actions = new List<CardAction>
+                {
+                    new CardAction
+                    {
+                        Type = ActionTypes.OpenUrl,
+                        Value = signInLink,
+                        Title = "Bot Service OAuth",
+                    },
+                },
+        },
+    },
+};
+```
 
-That request returns = 
-https://token.botframework.com/.auth/web/login/367ee542-a234-d782-cff9-814c00300d37_32eda70f-213a-d61f-bf6a?redirect_uri=https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b
+### Click on Sign In Url
+- Request
+  - Click on the Sign in Url
+  - https://token.botframework.com/api/oauth/signin?signin=f7e5543c902f441796859304743c04b3
+- Response
+  - https://token.botframework.com/.auth/web/login/367ee542-a234-d782-cff9-814c00300d37_32eda70f-213a-d61f-bf6a?redirect_uri=https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b
 
-Get request =
-https://token.botframework.com/.auth/web/login/367ee542-a234-d782-cff9-814c00300d37_32eda70f-213a-d61f-bf6a?redirect_uri=https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b
+### Redirect to Login
+- Request
+  - https://token.botframework.com/.auth/web/login/367ee542-a234-d782-cff9-814c00300d37_32eda70f-213a-d61f-bf6a?redirect_uri=https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b
+- Response
+  - https://accounts.google.com/o/oauth2/v2/auth?client_id=259923230032-ahlv7c0en40b22p68kal0a94r3dseg28.apps.googleusercontent.com&response_type=code&redirect_uri=https://token.botframework.com/.auth/web/redirect&scope=openid https://www.googleapis.com/auth/userinfo.email&state=8991fa390d8c4de6b93e24184fbb4759
 
-Returns
-https://accounts.google.com/o/oauth2/v2/auth?client_id=259923230032-ahlv7c0en40b22p68kal0a94r3dseg28.apps.googleusercontent.com&response_type=code&redirect_uri=https://token.botframework.com/.auth/web/redirect&scope=openid https://www.googleapis.com/auth/userinfo.email&state=8991fa390d8c4de6b93e24184fbb4759
+### Request Token from OAuth Provider
+- Request
+  - https://accounts.google.com/o/oauth2/v2/auth?client_id=259923230032-ahlv7c0en40b22p68kal0a94r3dseg28.apps.googleusercontent.com&response_type=code&redirect_uri=https://token.botframework.com/.auth/web/redirect&scope=openid https://www.googleapis.com/auth/userinfo.email&state=8991fa390d8c4de6b93e24184fbb4759
+- Response
+  - https://token.botframework.com/.auth/web/redirect?state=8991fa390d8c4de6b93e24184fbb4759&code=4/0AX4XfWhWIu14VRnqCYRRWVK6GR3FwVMeJ9Iy2TxXLoEoZSfvAn05camQTRDAGFrIxflrww&scope=email https://www.googleapis.com/auth/userinfo.email openid&authuser=0&prompt=none
 
+### Redirect with Auth Code
+- Request
+  - https://token.botframework.com/.auth/web/redirect?state=8991fa390d8c4de6b93e24184fbb4759&code=4/0AX4XfWhWIu14VRnqCYRRWVK6GR3FwVMeJ9Iy2TxXLoEoZSfvAn05camQTRDAGFrIxflrww&scope=email https://www.googleapis.com/auth/userinfo.email openid&authuser=0&prompt=none
+- Response
+  - https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b&code=609f02ce8dd3468fb8717340b1cd40a5
 
-Get request
-https://accounts.google.com/o/oauth2/v2/auth?client_id=259923230032-ahlv7c0en40b22p68kal0a94r3dseg28.apps.googleusercontent.com&response_type=code&redirect_uri=https://token.botframework.com/.auth/web/redirect&scope=openid https://www.googleapis.com/auth/userinfo.email&state=8991fa390d8c4de6b93e24184fbb4759
-
-Returns redirect 
-https://token.botframework.com/.auth/web/redirect?state=8991fa390d8c4de6b93e24184fbb4759&code=4/0AX4XfWhWIu14VRnqCYRRWVK6GR3FwVMeJ9Iy2TxXLoEoZSfvAn05camQTRDAGFrIxflrww&scope=email https://www.googleapis.com/auth/userinfo.email openid&authuser=0&prompt=none
-
-Get request 
-https://token.botframework.com/.auth/web/redirect?state=8991fa390d8c4de6b93e24184fbb4759&code=4/0AX4XfWhWIu14VRnqCYRRWVK6GR3FwVMeJ9Iy2TxXLoEoZSfvAn05camQTRDAGFrIxflrww&scope=email https://www.googleapis.com/auth/userinfo.email openid&authuser=0&prompt=none
-
-Returns moved
-https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b&code=609f02ce8dd3468fb8717340b1cd40a5
-
-Get Request
-https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b&code=609f02ce8dd3468fb8717340b1cd40a5
-
-Loads a page with a code
-
-microsoftTeams.initialize();
-microsoftTeams.authentication.notifySuccess('137249');
-
-This code is passed to the invoke command and passed in the get token call code=137249
-
-
+### Redirect to Post Sign In Callback
+- Request
+  - https://token.botframework.com/api/oauth/PostSignInCallback?signin=fcaada30162f49b08466beaed0e6370b&code=609f02ce8dd3468fb8717340b1cd40a5
+- Response
+  - Returns an HTML page that has a unique 'magicCode' tied to this sign In. The following JS code will execute with the page loads:
+  ```js
+  microsoftTeams.initialize();
+  microsoftTeams.authentication.notifySuccess('137249');
+  ```
+  - The code is then passed from Teams to the bot. The turnContext.Activity will contain the state ('magicCode') and will be passed the `GetUserTokenAsync` method to fetch the User Token.
 
 
-Client Credentials bot to Azure
+### Client Credentials used in OAuth HttpClient
 
-https://login.windows.net/botframework.com/
-with client credentials
+- Request
+  - Request with Azure Bot Client Credentials
+  - https://login.windows.net/botframework.com/
+- Response
+  - Auth token `eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dC....`
 
-returns auth token and this is sent as a header to other requests
-
-authtoken = eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dC....
 ```json
 {
   "typ": "JWT",
@@ -278,4 +305,3 @@ authtoken = eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dC....
   "ver": "1.0"
 }.[Signature]
 ```
-
