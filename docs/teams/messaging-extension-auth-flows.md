@@ -1,4 +1,4 @@
-# Messaging Extension with SSO Authentication Calls Detailed
+# Teams Messaging Extension with SSO Authentication Calls Detailed
 
 This documents the Single Sign On process for a Teams Messaging Extension.
 From the compose box click on the ... and find your Teams app and click on it.
