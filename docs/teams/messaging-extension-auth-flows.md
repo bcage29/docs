@@ -6,7 +6,7 @@ This will initiate an `Invoke` call to your bot.
 
 ### Post request received in controller
 
-The request has a `Bearer Token` in the header which is an Open ID token:
+The request has a `Bearer Token` in the header which is an ID token:
 ```json
 {
   "alg": "RS256",
@@ -22,7 +22,7 @@ The request has a `Bearer Token` in the header which is an Open ID token:
 }.[Signature]
 ```
 
-###  The Open ID Connect token is validated in the Bot Framework Adapter.
+### The ID token is validated in the Bot Framework Adapter.
 Here is the [Open ID Configuration](https://login.botframework.com/v1/.well-known/openidconfiguration)
 ```json
 {
